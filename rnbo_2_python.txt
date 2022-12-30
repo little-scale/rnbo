@@ -1,0 +1,35 @@
+from gpiozero import MCP3208
+from gpiozero import Button
+import liblo as OSC
+import sys
+
+# send all messages to port 1234 on the local machine
+try:
+        target = OSC.Address(1234)
+except OSC.AddressError as err:
+        print(err)
+        sys.exit()
+
+button = Button(26)
+button_state = 0
+
+def pressed():
+        global button_state
+        button_state = 1 - button_state
+        OSC.send(target, "/rnbo/inst/0/params/wetDry/normalized", button_state)
+        print(button_state)
+
+button.when_pressed = pressed
+
+# read from four channels
+pot1 = MCP3208(channel=0)
+pot2 = MCP3208(channel=1)
+pot3 = MCP3208(channel=2)
+pot4 = MCP3208(channel=3)
+
+while True:
+        print("Pot 1: ", pot1.value, "Pot 2: ", pot2.value, "Pot 3: ", pot3.value, "Pot 4: ", pot4.value, "Button: ", button_state)
+        OSC.send(target, "/rnbo/inst/0/params/delayTime/normalized", pot1.value)
+        OSC.send(target, "/rnbo/inst/0/params/feedback/normalized", pot2.value)
+        OSC.send(target, "/rnbo/inst/0/params/filterFreq/normalized", pot3.value)
+        OSC.send(target, "/rnbo/inst/0/params/filterRes/normalized", pot4.value)
