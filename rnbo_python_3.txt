@@ -1,0 +1,133 @@
+import liblo as OSC
+import sys
+from numpy import interp
+from gpiozero import RotaryEncoder
+from gpiozero import Button
+
+import time
+import subprocess
+
+from rpi_lcd import LCD
+
+
+
+# Create LCD
+lcd = LCD()
+lcd.clear()
+lcd.text("RNBO Params", 1)
+lcd.text("Display", 2)
+
+
+# Create encoders with a dict containing encoderss and RNBO params
+maxsteps = 16
+enc1 = RotaryEncoder(20, 26, max_steps = maxsteps)
+enc2 = RotaryEncoder(16, 19, max_steps = maxsteps)
+enc3 = RotaryEncoder(12, 6, max_steps = maxsteps)
+enc4 = RotaryEncoder(13, 5, max_steps = maxsteps)
+
+encdict = {
+        enc1: "delayTime",
+        enc2: "feedback",
+        enc3: "filterFreq",
+        enc4: "filterRes"
+}
+
+# Create button and setup toggle state
+button = Button(17)
+toggle_state = 0
+
+def pressed():
+        global toggle_state
+        toggle_state = 1 - toggle_state
+        OSC.send(target, "/rnbo/inst/0/params/wetDry/normalized", toggle_state)
+        print("button...", toggle_state)
+
+button.when_pressed = pressed
+
+# Setup OSC client to send OSC messages
+try:
+        server = OSC.Server(3001)
+except OSC.ServerError as err:
+        print(err)
+        sys.exit()
+
+# Setup OSC server to receive OSC messages
+try:
+        target = OSC.Address(1234)
+except OSC.AddressError as err:
+        print(err)
+        sys.exit()
+
+# Update params when encoders are rotated
+def encparam(enc):
+        string = "/rnbo/inst/0/params/"
+        string += encdict[enc]
+        string += "/normalized"
+        val = interp(enc.value, [-1, 1], [0, 1])
+        OSC.send(target, string, val)
+
+enc1.when_rotated = encparam
+enc2.when_rotated = encparam
+enc3.when_rotated = encparam
+enc4.when_rotated = encparam
+
+# Update encoders when params are changed
+def paramenc(string, val):
+        for key, value in encdict.items():
+                if value == string:
+                        val = interp(val, [0,1], [-1,1])
+                        key.value = val
+
+# Update button state if the wetDry parameter has been received remotely
+def wetdryhandle(val):
+        global toggle_state
+        val = round(val)
+        toggle_state = val
+
+#Write to LCD
+def paramLCD(string,val):
+        if len(string) > 15:
+                string = string[:16]
+        val = interp(val, [0, 1], [0, 100])
+        val = round(val, 2)
+        print(string, val)
+        lcd.text(string, 1)
+        lcd.text(str(val) + " %", 2)
+
+# Tell RNBO OSC runner that we want to add a listener listener (local IP address +  selected port)
+listener = "/rnbo/listeners/add"
+ip = "10.0.0.15:3001"
+OSC.send(target, listener, ip)
+print("Adding " + ip)
+
+# Tell RNBO OSC runner that we want to add additional listeners (laptop and phone)
+ip = "10.0.0.2:3001"
+OSC.send(target, listener, ip)
+print("Adding " + ip)
+
+ip = "10.0.0.10:3001"
+OSC.send(target, listener, ip)
+print("Adding " + ip)
+
+# Callback function for having recevied an OSC message on the server
+def callback(path, arg):
+        # Ignore messages regarding listeners, entries and disk space
+        if path != "/rnbo/listeners/add" and path != "/rnbo/listeners/entries" and path != "/rnbo/info/disk_bytes_av>
+                # Find the normalized messages, constrain the length of namespace, define range
+                string = path[20:]
+                normstring = string[-11:]
+                if normstring == "/normalized":
+                        string = string[:-11]
+                        val = arg[0]
+                        print(string, val)
+                        if string == "wetDry":
+                                wetdryhandle(val)
+                        else:
+                                paramenc(string, val)
+                                paramLCD(string, val)
+
+# Add the callback function to the OSC server - using None as the wildcard for both message pattern and data type
+server.add_method(None, None, callback)
+
+while True:
+        server.recv()
